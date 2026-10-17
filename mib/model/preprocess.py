@@ -49,18 +49,19 @@ def slerp(x, y, a):
     :return: tensor of interpolation results
     """
     device = x.device
-    len = torch.sum(x * y, dim=-1)
+    dot = torch.sum(x * y, dim=-1).clamp(-1.0, 1.0)
 
-    neg = len < 0.0
-    len[neg] = -len[neg]
-    y[neg] = -y[neg]
+    neg = dot < 0.0
+    dot = dot.abs()
+    # Do not mutate an endpoint view: it can alias the training ground truth.
+    y = torch.where(neg.unsqueeze(-1), -y, y)
 
     a = torch.zeros_like(x[..., 0]) + a
     amount0 = torch.zeros(a.shape, device=device)
     amount1 = torch.zeros(a.shape, device=device)
 
-    linear = (1.0 - len) < 0.01
-    omegas = torch.arccos(len[~linear])
+    linear = (1.0 - dot) < 0.01
+    omegas = torch.arccos(dot[~linear])
     sinoms = torch.sin(omegas)
 
     amount0[linear] = 1.0 - a[linear]
@@ -72,6 +73,12 @@ def slerp(x, y, a):
     res = amount0.unsqueeze(3) * x + amount1.unsqueeze(3) * y
 
     return res
+
+
+def _same_rotation(a, b):
+    # q and -q encode the same rotation; shortest-path SLERP may flip signs.
+    distance = torch.minimum((a - b).norm(dim=-1), (a + b).norm(dim=-1))
+    return bool(torch.all(distance < 1e-5))
 
 
 def slerp_input_repr(minibatch_pose_input, mask_start_frame):
@@ -93,8 +100,8 @@ def slerp_input_repr(minibatch_pose_input, mask_start_frame):
                 interpolate_start, interpolate_end, dt * i
             )
 
-        assert torch.allclose(interpolated[:, 0:1], interpolate_start)
-        assert torch.allclose(interpolated[:, seq_len - 1 :], interpolate_end)
+        assert _same_rotation(interpolated[:, 0:1], interpolate_start)
+        assert _same_rotation(interpolated[:, seq_len - 1 :], interpolate_end)
     else:
         interpolate_start1 = minibatch_pose_input[:, 0:1]
         interpolate_end1 = minibatch_pose_input[
@@ -112,8 +119,8 @@ def slerp_input_repr(minibatch_pose_input, mask_start_frame):
                 interpolate_start1, interpolate_end1, dt * i
             )
 
-        assert torch.allclose(interpolated[:, 0:1], interpolate_start1)
-        assert torch.allclose(
+        assert _same_rotation(interpolated[:, 0:1], interpolate_start1)
+        assert _same_rotation(
             interpolated[:, mask_start_frame : mask_start_frame + 1], interpolate_end1
         )
 
@@ -123,10 +130,10 @@ def slerp_input_repr(minibatch_pose_input, mask_start_frame):
                 interpolate_start2, interpolate_end2, dt * (i - mask_start_frame)
             )
 
-        assert torch.allclose(
+        assert _same_rotation(
             interpolated[:, mask_start_frame : mask_start_frame + 1], interpolate_start2
         )
-        assert torch.allclose(interpolated[:, seq_len - 1 :], interpolate_end2)
+        assert _same_rotation(interpolated[:, seq_len - 1 :], interpolate_end2)
 
     interpolated = torch.nn.functional.normalize(interpolated, p=2.0, dim=3)
     return interpolated.reshape(minibatch_pose_input.size(0), seq_len, -1)
