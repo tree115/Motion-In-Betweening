@@ -4,6 +4,8 @@ Fork of [Conditional Motion In-Betweening (CMIB)](https://github.com/jihoonerd/C
 
 **[Hướng dẫn chạy lại thí nghiệm và dựng demo Blender → DEMO_VI.md](DEMO_VI.md)**
 
+**[Mở notebook Google Colab để chạy inference và xuất demo Blender](notebooks/CMIB_Colab_Blender_Demo.ipynb)**
+
 - `trainer.py`: train CMIB with seeded runs and the paper's AdamW settings.
 - `demo.py`: checkpoint + LAFAN BVH/processed sample → four motion panels, metadata, optional BVH.
 - `tools/render_video.py`: Blender + FFmpeg → four-panel comparison video or sampled-pose still, with editable `.blend` scenes and a smoother procedural mannequin.
