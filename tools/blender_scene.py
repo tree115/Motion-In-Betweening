@@ -10,6 +10,9 @@ import numpy as np
 from mathutils import Vector
 
 
+_SPHERE_MESHES = {}
+
+
 def material(name, color, metallic=0.0):
     mat = bpy.data.materials.new(name)
     mat.diffuse_color = (*color, 1)
@@ -21,57 +24,119 @@ def material(name, color, metallic=0.0):
     return mat
 
 
+def unit_sphere_mesh(mat):
+    """Reuse one low-poly sphere mesh per material instead of spawning operators."""
+    if mat.name in _SPHERE_MESHES:
+        return _SPHERE_MESHES[mat.name]
+    segments, rings = 16, 10
+    vertices = []
+    for ring in range(rings + 1):
+        phi = math.pi * ring / rings
+        for segment in range(segments):
+            theta = 2 * math.pi * segment / segments
+            vertices.append(
+                (
+                    math.sin(phi) * math.cos(theta),
+                    math.sin(phi) * math.sin(theta),
+                    math.cos(phi),
+                )
+            )
+    faces = []
+    for ring in range(rings):
+        for segment in range(segments):
+            a = ring * segments + segment
+            b = ring * segments + (segment + 1) % segments
+            c = (ring + 1) * segments + (segment + 1) % segments
+            d = (ring + 1) * segments + segment
+            faces.append((a, b, c, d))
+    mesh = bpy.data.meshes.new(f"SharedSphere_{mat.name}")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.materials.append(mat)
+    for polygon in mesh.polygons:
+        polygon.use_smooth = True
+    mesh.update()
+    _SPHERE_MESHES[mat.name] = mesh
+    return mesh
+
+
+def sphere_object(name, scale, mat):
+    obj = bpy.data.objects.new(name, unit_sphere_mesh(mat))
+    bpy.context.collection.objects.link(obj)
+    obj.scale = scale
+    return obj
+
+
 def sphere(name, radius, mat):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=8, radius=radius)
-    obj = bpy.context.object
-    obj.name = name
-    obj.data.materials.append(mat)
-    for polygon in obj.data.polygons:
-        polygon.use_smooth = True
-    return obj
+    return sphere_object(name, (radius, radius, radius), mat)
 
 
-def segment(name, radius, mat):
-    bpy.ops.mesh.primitive_cone_add(
-        vertices=12, radius1=radius, radius2=radius * 0.8, depth=1
-    )
-    obj = bpy.context.object
-    obj.name = name
-    obj.data.materials.append(mat)
-    for polygon in obj.data.polygons:
-        polygon.use_smooth = True
-    return obj
+def ellipsoid(name, scale, mat):
+    return sphere_object(name, scale, mat)
 
 
-def orient_segment(obj, start, end):
+def orient_segment(obj, start, end, radius, length_factor=0.58):
     delta = Vector(end) - Vector(start)
     obj.location = (Vector(start) + Vector(end)) / 2
-    obj.scale.z = max(delta.length, 0.001)
+    obj.scale = (radius[0], radius[1], max(delta.length * length_factor, radius[0]))
     if delta.length > 1e-7:
         obj.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(delta)
 
 
 def mannequin(points, parents, mat, prefix):
-    joints, bones = [], []
+    """Build a smooth, stylized human figure from the 22 LAFAN joints."""
+    parts = []
     for j, point in enumerate(points):
-        radius = 0.105 if j == 13 else (0.075 if j in (0, 9, 10, 11, 12) else 0.044)
+        radius = 0.092 if j == 13 else (0.068 if j in (0, 9, 10, 11, 12) else 0.042)
         obj = sphere(f"{prefix}_joint_{j}", radius, mat)
         obj.location = point
-        # Slightly elongated head; all other joints are spherical.
         if j == 13:
-            obj.scale = (0.9, 0.9, 1.2)
-        joints.append(obj)
+            obj.scale = (radius * 0.88, radius * 0.9, radius * 1.2)
+        parts.append((obj, "point", j, None, None))
         if parents[j] >= 0:
-            radius = (
-                0.075
-                if j in (9, 10, 11, 12)
-                else (0.055 if j in (2, 3, 6, 7) else 0.035)
-            )
-            bone = segment(f"{prefix}_bone_{j}", radius, mat)
+            radii = {
+                1: (0.073, 0.069), 2: (0.052, 0.050),
+                3: (0.052, 0.068), 4: (0.046, 0.035),
+                5: (0.073, 0.069), 6: (0.052, 0.050),
+                7: (0.052, 0.068), 8: (0.046, 0.035),
+                9: (0.105, 0.092), 10: (0.125, 0.105),
+                11: (0.145, 0.115), 12: (0.045, 0.045),
+                13: (0.078, 0.082), 14: (0.068, 0.065),
+                15: (0.049, 0.046), 16: (0.040, 0.038),
+                17: (0.040, 0.034), 18: (0.068, 0.065),
+                19: (0.049, 0.046), 20: (0.040, 0.038),
+                21: (0.040, 0.034),
+            }
+            radius = radii[j]
+            length_factor = 0.72 if j in (3, 4, 7, 8, 13) else 0.58
+            bone = ellipsoid(f"{prefix}_bone_{j}", (*radius, 0.1), mat)
             bone.rotation_mode = "QUATERNION"
-            orient_segment(bone, points[parents[j]], point)
-            bones.append((j, bone))
-    return joints, bones
+            orient_segment(
+                bone, points[parents[j]], point, radius, length_factor
+            )
+            parts.append((bone, "segment", parents[j], j, (radius, length_factor)))
+
+    # Fill the gaps in the sparse LAFAN rig with a pelvis, rib cage and chest.
+    # These stay attached to the same joints as the benchmark skeleton.
+    pelvis = ellipsoid(f"{prefix}_pelvis", (0.145, 0.105, 0.105), mat)
+    pelvis.location = points[0]
+    parts.append((pelvis, "point", 0, None, None))
+    torso = ellipsoid(f"{prefix}_torso", (0.125, 0.095, 0.1), mat)
+    torso.rotation_mode = "QUATERNION"
+    orient_segment(torso, points[0], points[11], (0.125, 0.095), 0.72)
+    parts.append((torso, "segment", 0, 11, ((0.125, 0.095), 0.72)))
+    chest = ellipsoid(f"{prefix}_chest", (0.155, 0.105, 0.1), mat)
+    chest.location = points[11]
+    parts.append((chest, "point", 11, None, None))
+    return parts
+
+
+def pose_mannequin(parts, points):
+    for obj, kind, start, end, shape in parts:
+        if kind == "point":
+            obj.location = points[start]
+        else:
+            radius, length_factor = shape
+            orient_segment(obj, points[start], points[end], radius, length_factor)
 
 
 def aim(obj, target):
@@ -204,29 +269,26 @@ def main():
             mannequin(points[i], parents, body, f"TRAIL_{i}")
         scene.frame_end = 1
     else:
-        joints, bones = mannequin(points[0], parents, body, "MOTION")
+        parts = mannequin(points[0], parents, body, "MOTION")
         for t, pose in enumerate(points, 1):
-            for j, obj in enumerate(joints):
-                obj.location = pose[j]
+            pose_mannequin(parts, pose)
+            for obj, kind, _, _, _ in parts:
                 obj.keyframe_insert(data_path="location", frame=t)
                 obj.hide_render = t in (1, pos.shape[1]) or (
                     args.panel == 2 and t == anchor + 1
                 )
                 obj.keyframe_insert(data_path="hide_render", frame=t)
-            for j, obj in bones:
-                orient_segment(obj, pose[parents[j]], pose[j])
-                obj.hide_render = t in (1, pos.shape[1]) or (
-                    args.panel == 2 and t == anchor + 1
-                )
-                obj.keyframe_insert(data_path="hide_render", frame=t)
-                for prop in ("location", "rotation_quaternion", "scale"):
-                    obj.keyframe_insert(data_path=prop, frame=t)
-        for obj in list(joints) + [obj for _, obj in bones]:
+                if kind == "segment":
+                    for prop in ("rotation_quaternion", "scale"):
+                        obj.keyframe_insert(data_path=prop, frame=t)
+        for obj, _, _, _, _ in parts:
             if obj.animation_data and obj.animation_data.action:
                 for curve in obj.animation_data.action.fcurves:
                     for key in curve.keyframe_points:
                         key.interpolation = (
-                            "CONSTANT" if curve.data_path == "hide_render" else "LINEAR"
+                            "CONSTANT"
+                            if curve.data_path == "hide_render"
+                            else "LINEAR"
                         )
     scene.frame_set(1)
     scene.render.filepath = str((args.output / "frame_").resolve())

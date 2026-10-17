@@ -1,7 +1,7 @@
 # Tái hiện CMIB và dựng demo Blender
 
-Repo này đã có pipeline `demo.py -> motion.npz/BVH -> Blender -> MP4`.
-Paper **Conditional Motion In-betweening** (Kim et al., 2022, mục 5.2) dùng Unity để trình diễn; Blender thay được khâu trình diễn, không thay mô hình. Cảnh mặc định ở đây là mannequin ghép khớp, sàn ô vuông, bóng đổ, cùng camera cho bốn ô. Không kèm nhân vật/mesh của tác giả.
+Repo này có pipeline `demo.py -> motion.npz/BVH -> Blender -> MP4`.
+Paper **Conditional Motion In-betweening** (Kim et al., 2022, mục 5.2) dùng Unity để trình diễn; Blender thay được khâu trình diễn, không thay mô hình. Cảnh mặc định ở đây là mannequin procedural có thân và tay chân bo tròn, sàn ô vuông, bóng đổ, cùng camera cho bốn ô. Cấu hình render kiểm chứng trong cloud là Blender 4.3.2 + Cycles CPU; EEVEE cần backend đồ họa phù hợp và không dùng được trong cloud headless hiện tại. Không kèm nhân vật/mesh của tác giả.
 
 ## 1. Môi trường
 
@@ -117,7 +117,7 @@ python tools/render_video.py \
   --width 960 --height 540 --samples 96 --threads 8
 ```
 
-Output: `comparison.mp4`, bốn video riêng, PNG từng frame, `panel_0/scene.blend` … `panel_3/scene.blend`, và log render/encode. Mở `.blend` trong Blender để thay vật liệu, camera, ánh sáng hoặc kiểm tra keyframe. Start màu đỏ, target xanh dương; ô pose có anchor xanh lá. Mặc định render Cycles CPU để chạy được headless; không yêu cầu OpenGL/GPU. `--engine BLENDER_EEVEE_NEXT` cần backend đồ họa phù hợp. Dùng `--overwrite` khi chủ ý render lại vào thư mục đã có kết quả.
+Output: `comparison.mp4`, bốn video riêng, PNG từng frame, `panel_0/scene.blend` … `panel_3/scene.blend`, và log render/encode. Mở `.blend` trong Blender để thay vật liệu, camera, ánh sáng hoặc kiểm tra keyframe. Start màu đỏ, target xanh dương; ô pose có anchor xanh lá. Mannequin procedural tạo được hình chuyển động dễ đọc nhưng không có mesh/quần áo của paper. Mặc định render Cycles CPU để chạy được headless; không yêu cầu OpenGL/GPU. `--engine BLENDER_EEVEE_NEXT` chỉ dùng khi máy có backend đồ họa tương thích. Dùng `--overwrite` khi chủ ý render lại vào thư mục đã có kết quả.
 
 Hình tĩnh chồng nhiều thời điểm giống bố cục trong ảnh bạn gửi:
 
