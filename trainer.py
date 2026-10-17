@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,11 @@ from cmib.model.skeleton import (Skeleton, sk_joints_to_remove, sk_offsets, sk_p
 
 def train(opt, device):
 
+    random.seed(opt.seed)
+    np.random.seed(opt.seed)
+    torch.manual_seed(opt.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(opt.seed)
     print(f"[DATASET: {opt.dataset}]")
     # Prepare Directories
     save_dir = Path(opt.save_dir)
@@ -90,7 +96,7 @@ def train(opt, device):
     transformer_encoder.to(device)
 
     l1_loss = nn.L1Loss()
-    optim = AdamW(params=transformer_encoder.parameters(), lr=opt.learning_rate)
+    optim = AdamW(params=transformer_encoder.parameters(), lr=opt.learning_rate, betas=(0.9, 0.99), weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=100, gamma=0.9)
 
     for epoch in range(1, epochs + 1):
@@ -127,12 +133,12 @@ def train(opt, device):
 
                 cond_pred = output[0:1, :, :]
                 cond_loss = l1_loss(cond_pred, cond_gt)
-                recon_cond_loss.append(opt.loss_cond_weight * cond_loss)
+                recon_cond_loss.append((opt.loss_cond_weight * cond_loss).detach())
 
                 pos_pred = output[1:,:,:pos_dim].permute(1,0,2)
                 pos_gt = minibatch_pose_gt[:,:,:pos_dim]
                 pos_loss = l1_loss(pos_pred, pos_gt)
-                recon_pos_loss.append(opt.loss_pos_weight * pos_loss)
+                recon_pos_loss.append((opt.loss_pos_weight * pos_loss).detach())
 
                 rot_pred = output[1:,:,pos_dim:].permute(1,0,2)
                 rot_pred_reshaped = rot_pred.reshape(rot_pred.shape[0], rot_pred.shape[1], lafan_dataset.num_joints, 4)
@@ -141,13 +147,13 @@ def train(opt, device):
                 rot_gt = minibatch_pose_gt[:,:,pos_dim:]
                 rot_gt_reshaped = rot_gt.reshape(rot_gt.shape[0], rot_gt.shape[1], lafan_dataset.num_joints, 4)
                 rot_loss = l1_loss(rot_pred_reshaped, rot_gt_reshaped)
-                recon_rot_loss.append(opt.loss_rot_weight * rot_loss)
+                recon_rot_loss.append((opt.loss_rot_weight * rot_loss).detach())
 
                 total_g_loss = opt.loss_pos_weight * pos_loss + \
                                 opt.loss_rot_weight * rot_loss + \
                                 opt.loss_cond_weight * cond_loss
 
-                total_loss_list.append(total_g_loss)
+                total_loss_list.append(total_g_loss.detach())
             
                 optim.zero_grad()
                 total_g_loss.backward()
@@ -166,8 +172,10 @@ def train(opt, device):
         wandb.log(log_dict)
 
         # Save model
-        if (epoch % save_interval) == 0:
+        if (epoch % save_interval) == 0 or epoch == epochs:
             ckpt = {'epoch': epoch,
+                    'seed': opt.seed,
+                    'num_labels': num_labels,
                     'transformer_encoder_state_dict': transformer_encoder.state_dict(),
                     'horizon': transformer_encoder.seq_len,
                     'from_idx': opt.from_idx,
@@ -194,6 +202,7 @@ def parse_opt():
     parser.add_argument('--window', type=int, default=90, help='horizon')
     parser.add_argument('--wandb_pj_name', type=str, default='cmib_train', help='project name')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+    parser.add_argument('--seed', type=int, default=42, help='random seed for reproducible reruns')
     parser.add_argument('--epochs', type=int, default=3000)
     parser.add_argument('--device', default='0', help='cuda device')
     parser.add_argument('--entity', default=None, help='W&B entity')
