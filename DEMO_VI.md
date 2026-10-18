@@ -132,6 +132,27 @@ Kết quả `comparison.png`. Không dùng `--max-frames` khi muốn hình tĩnh
 
 Muốn nhân vật người có mesh như ảnh: import BVH qua **File → Import → Motion Capture (.bvh)** (bật extension BVH nếu Blender chưa có), tỷ lệ cm→m `0.01`, forward `-Z`, up `Y`. Retarget rig nguồn sang rig nhân vật bằng mapping bone/rest pose và kiểm tra hướng trục, chiều dài chân, vị trí root. Rig Mixamo/Rigify không dùng chung rest pose với LAFAN nên không gán thẳng quaternion vào bone tương ứng. Kiểm tra bản BVH trước khi thêm foot IK hoặc contact cleanup; giữ video chưa cleanup để so sánh phương pháp. Hiện chưa có mesh/rig đích nên repo không tự động retarget một nhân vật bất kỳ. Mannequin mặc định dùng mesh segment có keyframe vị trí, không phải skinned character.
 
+### Tùy chọn: SMPL mesh bằng Diffusion-Motion-Inbetweening
+
+Repo [setarehc/diffusion-motion-inbetweening](https://github.com/setarehc/diffusion-motion-inbetweening) nhận `results.npy` với 22 khớp theo thứ tự HumanML3D, rồi dùng SMPLify để khớp SMPL. Đầu ra CMIB là skeleton LAFAN theo thứ tự khác, nên **không** đưa `motion.npz` hoặc MP4 trực tiếp vào `visualize/render_mesh`. Adapter dưới đây đổi thứ tự khớp, nội suy hai khớp collar còn thiếu, đổi cm sang mét, và đặt video cạnh `results.npy` theo quy ước của script gốc:
+
+```bash
+python tools/export_smplify_input.py \
+  --motion /workspace/outputs/cmib-walk/motion.npz \
+  --render-dir /workspace/outputs/cmib-video \
+  --output /workspace/outputs/cmib-smplify
+```
+
+Lệnh `--render-dir` phải là thư mục đã render đầy đủ bằng `tools/render_video.py`; kết quả có `results.npy` cùng `sample00_rep00.mp4` … `sample03_rep00.mp4`. Clone repo Diffusion ở môi trường riêng, cài dependency và SMPL assets theo README của họ, sau đó chạy từ thư mục repo đó:
+
+```bash
+python -m visualize.render_mesh \
+  --input_path /workspace/outputs/cmib-smplify/sample01_rep00.mp4 \
+  --sample 1 --device 0
+```
+
+Lặp lại với `sample00`, `sample02`, `sample03` và chỉ số `--sample` tương ứng để tạo mesh cho bốn panel. Không đổi vị trí video sau khi export vì script gốc tìm `results.npy` cạnh file MP4. Cần model SMPL có giấy phép, file pose mean, các dependency của dự án Diffusion và GPU; CMIB chỉ cung cấp adapter, không đóng gói SMPL assets hay SMPLify. Đây là phép khớp SMPLify lên các khớp LAFAN đã map, không phải rig/mesh ground truth từ paper CMIB. Chất lượng phụ thuộc mapping 22 khớp và có thể có sai khác ở thân, bàn chân hoặc hướng trục; kiểm tra mesh/video trước khi dùng làm kết quả định lượng. Không dùng test fixture tổng hợp để đánh giá chất lượng SMPL.
+
 ## 5. Huấn luyện lại thay vì dùng pretrained
 
 Paper mục 4.5: 7 attention heads, 8 encoder layers, FFN 2048, dropout 0.05; AdamW lr=1e-4, betas=(0.9, 0.99), weight decay=0.01; batch 32; loss weights semantic/position/rotation = 1.5/0.05/2.0.
