@@ -1,7 +1,7 @@
 # Tái hiện CMIB và dựng demo Blender
 
-Repo này đã có pipeline `demo.py -> motion.npz/BVH -> Blender -> MP4`.
-Paper **Conditional Motion In-betweening** (Kim et al., 2022, mục 5.2) dùng Unity để trình diễn; Blender thay được khâu trình diễn, không thay mô hình. Cảnh mặc định ở đây là mannequin ghép khớp, sàn ô vuông, bóng đổ, cùng camera cho bốn ô. Không kèm nhân vật/mesh của tác giả.
+Repo này có pipeline `demo.py -> motion.npz/BVH -> Blender -> MP4`.
+Paper **Conditional Motion In-betweening** (Kim et al., 2022, mục 5.2) dùng Unity để trình diễn; Blender thay được khâu trình diễn, không thay mô hình. Cảnh mặc định ở đây là mannequin procedural có thân và tay chân bo tròn, sàn ô vuông, bóng đổ, cùng camera cho bốn ô. Cấu hình render kiểm chứng trong cloud là Blender 4.3.2 + Cycles CPU; EEVEE cần backend đồ họa phù hợp và không dùng được trong cloud headless hiện tại. Không kèm nhân vật/mesh của tác giả.
 
 ## 1. Môi trường
 
@@ -117,7 +117,7 @@ python tools/render_video.py \
   --width 960 --height 540 --samples 96 --threads 8
 ```
 
-Output: `comparison.mp4`, bốn video riêng, PNG từng frame, `panel_0/scene.blend` … `panel_3/scene.blend`, và log render/encode. Mở `.blend` trong Blender để thay vật liệu, camera, ánh sáng hoặc kiểm tra keyframe. Start màu đỏ, target xanh dương; ô pose có anchor xanh lá. Mặc định render Cycles CPU để chạy được headless; không yêu cầu OpenGL/GPU. `--engine BLENDER_EEVEE_NEXT` cần backend đồ họa phù hợp. Dùng `--overwrite` khi chủ ý render lại vào thư mục đã có kết quả.
+Output: `comparison.mp4`, bốn video riêng, PNG từng frame, `panel_0/scene.blend` … `panel_3/scene.blend`, và log render/encode. Mở `.blend` trong Blender để thay vật liệu, camera, ánh sáng hoặc kiểm tra keyframe. Start màu đỏ, target xanh dương; ô pose có anchor xanh lá. Mannequin procedural tạo được hình chuyển động dễ đọc nhưng không có mesh/quần áo của paper. Mặc định render Cycles CPU để chạy được headless; không yêu cầu OpenGL/GPU. `--engine BLENDER_EEVEE_NEXT` chỉ dùng khi máy có backend đồ họa tương thích. Dùng `--overwrite` khi chủ ý render lại vào thư mục đã có kết quả.
 
 Hình tĩnh chồng nhiều thời điểm giống bố cục trong ảnh bạn gửi:
 
@@ -131,6 +131,27 @@ python tools/render_video.py \
 Kết quả `comparison.png`. Không dùng `--max-frames` khi muốn hình tĩnh bao trùm cả chuyển động.
 
 Muốn nhân vật người có mesh như ảnh: import BVH qua **File → Import → Motion Capture (.bvh)** (bật extension BVH nếu Blender chưa có), tỷ lệ cm→m `0.01`, forward `-Z`, up `Y`. Retarget rig nguồn sang rig nhân vật bằng mapping bone/rest pose và kiểm tra hướng trục, chiều dài chân, vị trí root. Rig Mixamo/Rigify không dùng chung rest pose với LAFAN nên không gán thẳng quaternion vào bone tương ứng. Kiểm tra bản BVH trước khi thêm foot IK hoặc contact cleanup; giữ video chưa cleanup để so sánh phương pháp. Hiện chưa có mesh/rig đích nên repo không tự động retarget một nhân vật bất kỳ. Mannequin mặc định dùng mesh segment có keyframe vị trí, không phải skinned character.
+
+### Tùy chọn: SMPL mesh bằng Diffusion-Motion-Inbetweening
+
+Repo [setarehc/diffusion-motion-inbetweening](https://github.com/setarehc/diffusion-motion-inbetweening) nhận `results.npy` với 22 khớp theo thứ tự HumanML3D, rồi dùng SMPLify để khớp SMPL. Đầu ra CMIB là skeleton LAFAN theo thứ tự khác, nên **không** đưa `motion.npz` hoặc MP4 trực tiếp vào `visualize/render_mesh`. Adapter dưới đây đổi thứ tự khớp, nội suy hai khớp collar còn thiếu, đổi cm sang mét, và đặt video cạnh `results.npy` theo quy ước của script gốc:
+
+```bash
+python tools/export_smplify_input.py \
+  --motion /workspace/outputs/cmib-walk/motion.npz \
+  --render-dir /workspace/outputs/cmib-video \
+  --output /workspace/outputs/cmib-smplify
+```
+
+Lệnh `--render-dir` phải là thư mục đã render đầy đủ bằng `tools/render_video.py`; kết quả có `results.npy` cùng `sample00_rep00.mp4` … `sample03_rep00.mp4`. Clone repo Diffusion ở môi trường riêng, cài dependency và SMPL assets theo README của họ, sau đó chạy từ thư mục repo đó:
+
+```bash
+python -m visualize.render_mesh \
+  --input_path /workspace/outputs/cmib-smplify/sample01_rep00.mp4 \
+  --sample 1 --device 0
+```
+
+Lặp lại với `sample00`, `sample02`, `sample03` và chỉ số `--sample` tương ứng để tạo mesh cho bốn panel. Không đổi vị trí video sau khi export vì script gốc tìm `results.npy` cạnh file MP4. Cần model SMPL có giấy phép, file pose mean, các dependency của dự án Diffusion và GPU; CMIB chỉ cung cấp adapter, không đóng gói SMPL assets hay SMPLify. Đây là phép khớp SMPLify lên các khớp LAFAN đã map, không phải rig/mesh ground truth từ paper CMIB. Chất lượng phụ thuộc mapping 22 khớp và có thể có sai khác ở thân, bàn chân hoặc hướng trục; kiểm tra mesh/video trước khi dùng làm kết quả định lượng. Không dùng test fixture tổng hợp để đánh giá chất lượng SMPL.
 
 ## 5. Huấn luyện lại thay vì dùng pretrained
 
