@@ -100,10 +100,10 @@ def main():
     xyz = humanml3d_joints(positions.reshape(-1, 22, 3) * unit_scale).reshape(
         positions.shape[0], positions.shape[1], 22, 3
     )
-    lengths = np.full((1, 4), xyz.shape[1], dtype=np.int64)
+    lengths = np.full(4, xyz.shape[1], dtype=np.int64)
     results = {
-        "motion": xyz.transpose(0, 2, 3, 1)[None],  # [rep=1, samples=4, 22, 3, T]
-        "text": np.asarray([[f"CMIB {name}" for name in panels]], dtype=object),
+        "motion": xyz.transpose(0, 2, 3, 1),  # [samples=4, 22, 3, T]
+        "text": np.asarray([f"CMIB {name}" for name in panels], dtype=object),
         "lengths": lengths,
         "num_samples": 4,
         "num_repetitions": 1,
